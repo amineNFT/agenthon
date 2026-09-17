@@ -391,26 +391,36 @@ export default function Desk() {
 
   return (
     <>
-      <header className="site-header">
+      <header className="topbar">
         <div className="brand">
-          <Star size={18} />
-          <div>
+          <span className="brand-mark">
+            <Star size={16} />
+          </span>
+          <div className="brand-text">
             <strong>Agenthon</strong>
             <span>Agent work, graded by consensus</span>
           </div>
         </div>
-        <Button
-          variant="outline"
-          disabled={Boolean(busy)}
-          onClick={() => {
-            setError('');
-            if (wallet) disconnectWallet();
-            else void connectWallet();
-          }}
-        >
-          <Wallet />
-          {wallet ? `${selectedWallet?.name ?? 'Wallet'} · ${short(wallet)}` : 'Connect wallet'}
-        </Button>
+        <div className="topbar-right">
+          <Button variant="outline" size="sm" onClick={() => setModal('network')}>
+            <Settings2 /> {config.contract ? 'Network' : 'Set contract'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={Boolean(busy)}
+            onClick={() => {
+              setError('');
+              if (wallet) disconnectWallet();
+              else void connectWallet();
+            }}
+          >
+            <Wallet />
+            {wallet
+              ? `${selectedWallet?.name ?? 'Wallet'} · ${short(wallet)}`
+              : 'Connect wallet'}
+          </Button>
+        </div>
       </header>
       <main className="desk">
         <div className="page-heading">
@@ -418,7 +428,8 @@ export default function Desk() {
             <h1>Agent workbench</h1>
             <p className="lede">
               Post a task with a rubric. An agent delivers. Validators grade the
-              work and the score follows that agent everywhere.
+              work against that rubric, and the score follows the agent to every
+              other task.
             </p>
           </div>
           <Button className="primary-action" onClick={() => setModal('new')}>
@@ -427,17 +438,22 @@ export default function Desk() {
         </div>
         <div className="workspace-bar">
           <div>
-            {config.network === 'studioDevnet'
-              ? 'GenLayer Studio Next'
-              : 'Bradbury testnet'}
+            <span className={`net-dot ${config.contract ? '' : 'off'}`} />
+            <strong>
+              {config.network === 'studioDevnet'
+                ? 'GenLayer Studio Next'
+                : 'Bradbury testnet'}
+            </strong>
             <span className="bar-divider">·</span>
             <span>
-              {config.contract ? 'Test network · Test tokens only' : 'Contract not configured'}
+              {config.contract
+                ? 'Test network · test tokens only'
+                : 'Contract not configured'}
             </span>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => setModal('network')}>
-            <Settings2 /> Network settings
-          </Button>
+          <span className="mono">
+            {config.contract ? short(config.contract) : 'no contract'}
+          </span>
         </div>
         {notice && (
           <output className="message notice">
@@ -449,160 +465,235 @@ export default function Desk() {
         )}
         <ErrorMessage message={error} />
         {record && (
-          <div className="pending-box">
-            <div>
+          <div className="agent-card">
+            <div className="card-head">
               <strong>Your agent record</strong>
-              <p>
-                Graded deliveries {record.graded} · accepted {record.accepted} · average{' '}
-                {record.average}/100 · earned {formatAmount(record.earned_wei)} GEN
-              </p>
-              <p>
-                {record.trusted
-                  ? 'Trusted agent: funded work is open to you.'
-                  : fundedEligibility(record) ?? 'Eligible for funded work.'}
-              </p>
+              <span className={`status ${record.trusted ? 'accepted' : 'open'}`}>
+                {record.trusted ? 'Trusted agent' : 'Building a record'}
+              </span>
             </div>
+            <div className="stat">
+              <b>{record.graded}</b>
+              <span>Graded</span>
+            </div>
+            <div className="stat">
+              <b>{record.accepted}</b>
+              <span>Accepted</span>
+            </div>
+            <div className="stat">
+              <b>{record.average}</b>
+              <span>Average</span>
+            </div>
+            <div className="stat">
+              <b>{formatAmount(record.earned_wei)}</b>
+              <span>GEN earned</span>
+            </div>
+            <p className="card-note">
+              {record.trusted
+                ? 'Funded work is open to this address on every task that reads it.'
+                : fundedEligibility(record) ?? 'Eligible for funded work.'}
+            </p>
           </div>
         )}
         {pending && (
-          <div className="pending-box">
-            <div>
-              <strong>Transaction submitted</strong>
-              <p>
-                {pending.action.replaceAll('_', ' ')} · {pending.config.network}
-              </p>
-              <code>{pending.hash}</code>
-              <p>Keep this ID. A timeout does not mean the transaction failed.</p>
-              {feeQuote && <FeeReceipt quote={feeQuote} busy={Boolean(busy)} />}
-              {feeUsed && <p>{feeUsageLine(feeUsed)}</p>}
+          <div className="tx-card">
+            <div className="card-head">
+              <strong>
+                Transaction submitted · {pending.action.replaceAll('_', ' ')}
+              </strong>
+              <span className="status open">{pending.config.network}</span>
             </div>
-            <Button
-              variant="outline"
-              disabled={Boolean(busy)}
-              onClick={() => run('Checking transaction', () => complete(pending))}
-            >
-              <RefreshCw /> Check status
-            </Button>
+            <code>{pending.hash}</code>
+            <p className="card-note">
+              Keep this ID. A timeout does not mean the transaction failed.
+            </p>
+            {feeQuote && <FeeReceipt quote={feeQuote} busy={Boolean(busy)} />}
+            {feeUsed && <p className="card-note">{feeUsageLine(feeUsed)}</p>}
+            <div className="tx-actions">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={Boolean(busy)}
+                onClick={() => run('Checking transaction', () => complete(pending))}
+              >
+                <RefreshCw /> Check status
+              </Button>
+            </div>
           </div>
         )}
         <div className="workbench">
-          <aside className="brief-list">
-            <Tabs
-              value={scope}
-              onValueChange={(value) => setScope(value as 'mine' | 'all')}
-            >
-              <TabsList>
-                <TabsTrigger value="mine">My tasks</TabsTrigger>
-                <TabsTrigger value="all">All tasks</TabsTrigger>
-              </TabsList>
-            </Tabs>
+          <aside className="task-rail">
+            <div className="rail-head">
+              <span className="rail-title">Tasks</span>
+              <Tabs
+                value={scope}
+                onValueChange={(value) => setScope(value as 'mine' | 'all')}
+              >
+                <TabsList>
+                  <TabsTrigger value="mine">Mine</TabsTrigger>
+                  <TabsTrigger value="all">All</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search tasks"
               aria-label="Search tasks"
             />
-            <Button
-              variant="ghost"
-              className="load-briefs"
-              disabled={disabled}
-              onClick={() => void run('Loading network tasks', () => refresh(more))}
-            >
-              <RefreshCw /> {more ? 'Load more' : 'Load network tasks'}
-            </Button>
-            {visible.length ? (
-              visible.map((row) => (
-                <button
-                  key={`${row.origin}:${row.id}`}
-                  className={`brief-row ${task?.id === row.id ? 'active' : ''}`}
-                  onClick={() => setSelected(row.id)}
-                >
-                  <span>{row.title}</span>
-                  <Badge status={row.status} />
-                </button>
-              ))
-            ) : (
-              <p className="help-text">
-                No tasks yet. Create one, or load the records already on the
-                contract.
-              </p>
-            )}
+            <div className="rail-list">
+              {visible.length ? (
+                visible.map((row) => (
+                  <button
+                    key={`${row.origin}:${row.id}`}
+                    className={`task-row ${task?.id === row.id ? 'active' : ''}`}
+                    onClick={() => setSelected(row.id)}
+                  >
+                    <span className="row-title">{row.title}</span>
+                    <Badge status={row.status} />
+                    <span className="row-meta">
+                      <span>{formatAmount(row.bounty_wei)} GEN</span>
+                      <span>· {daysLeft(row.deadline, now)}d left</span>
+                      {row.grade && (
+                        <span className="score-chip">{row.score}/100</span>
+                      )}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="rail-empty">
+                  No tasks yet. Create one, or load the records already on the
+                  contract.
+                </div>
+              )}
+            </div>
+            <div className="rail-actions">
+              <Button
+                variant="outline"
+                size="sm"
+                className="load-briefs"
+                disabled={disabled}
+                onClick={() => void run('Loading network tasks', () => refresh(more))}
+              >
+                <RefreshCw /> {more ? 'Load more' : 'Load network tasks'}
+              </Button>
+            </div>
           </aside>
           <section className="case">
             {!task ? (
-              <p className="help-text">
-                Select a task, or create one to commission agent work.
-              </p>
+              <div className="empty-state">
+                Select a task on the left, or create one to commission agent
+                work.
+              </div>
             ) : (
               <>
                 <div className="case-topline">
                   <span className="eyebrow">
-                    {task.origin === 'draft' ? 'LOCAL DRAFT' : 'CONTRACT RECORD'}
+                    {task.origin === 'draft' ? 'Local draft' : 'Contract record'}
                   </span>
                   <Badge status={task.status} />
                 </div>
-                <h2>{task.title}</h2>
-                <p className="help-text">
-                  Requester {short(task.requester)} · Agent {short(task.agent)} ·
-                  Budget {formatAmount(task.bounty_wei)} GEN ·{' '}
-                  {daysLeft(task.deadline, now)} days left · delivery{' '}
-                  {task.revision}
-                </p>
-                <h3>Rubric</h3>
-                <ol className="criteria">
-                  {task.rubric.map((row, index) => {
-                    const graded = task.grade?.criteria.find((c) => c.index === index);
-                    return (
-                      <li key={row}>
-                        <span>{row}</span>
-                        {graded && (
-                          <span className={`band ${graded.band}`}>
-                            {LABELS[graded.band]} — {graded.reason}
-                          </span>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ol>
+                <div className="case-title-row">
+                  <h2>{task.title}</h2>
+                </div>
+                <div className="case-meta">
+                  <span>
+                    Requester <b>{short(task.requester)}</b>
+                  </span>
+                  <span>
+                    Agent <b>{short(task.agent)}</b>
+                  </span>
+                  <span>
+                    Budget <b>{formatAmount(task.bounty_wei)} GEN</b>
+                  </span>
+                  <span>
+                    <b>{daysLeft(task.deadline, now)}</b> days left
+                  </span>
+                  <span>
+                    Delivery <b>{task.revision}</b>
+                  </span>
+                </div>
                 {task.grade && (
-                  <div className="grade-box">
-                    <strong>
-                      Score {task.score}/100 · {LABELS[task.grade.decision]}
-                    </strong>
-                    <p>
-                      Graded by GenLayer validators against the rubric above.
-                    </p>
+                  <div className="score-card">
+                    <div className="score-value">
+                      {task.score}
+                      <small>/100</small>
+                    </div>
+                    <div className="score-caption">
+                      <strong>{LABELS[task.grade.decision]}</strong>
+                      <span>
+                        Graded by GenLayer validators against this rubric. The
+                        score is recorded against {short(task.agent)}.
+                      </span>
+                      <div className="score-bar">
+                        <i style={{ width: `${Math.max(2, task.score)}%` }} />
+                      </div>
+                    </div>
                   </div>
                 )}
+                <div className="section">
+                  <div className="section-label">Rubric</div>
+                  <ol className="rubric">
+                    {task.rubric.map((row, index) => {
+                      const graded = task.grade?.criteria.find(
+                        (c) => c.index === index,
+                      );
+                      return (
+                        <li key={row} className="rubric-item">
+                          <span className="rubric-index">
+                            {String(index + 1).padStart(2, '0')}
+                          </span>
+                          <span>{row}</span>
+                          {graded ? (
+                            <Badge status={graded.band} />
+                          ) : (
+                            <span className="status unsupported">Awaiting grade</span>
+                          )}
+                          {graded && (
+                            <span className="rubric-reason">{graded.reason}</span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
                 {task.submission && (
-                  <>
-                    <h3>Delivered summary</h3>
-                    <p>{task.submission.summary}</p>
-                    {task.submission.claims.length > 0 && (
-                      <>
-                        <h3>Citations</h3>
-                        <ul className="claims">
-                          {task.submission.claims.map((citation, index) => {
-                            const result = task.grade?.citations[index];
-                            return (
-                              <li key={citation.text}>
-                                <span>{citation.text}</span>
-                                <a href={citation.url} target="_blank" rel="noreferrer">
-                                  {citation.url}
-                                </a>
-                                {result && (
-                                  <span className={`status ${result.verdict}`}>
-                                    {LABELS[result.verdict]}
-                                    {result.quote ? ` — “${result.quote}”` : ''}
-                                  </span>
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </>
-                    )}
-                  </>
+                  <div className="section">
+                    <div className="section-label">Delivered summary</div>
+                    <p className="deliverable">{task.submission.summary}</p>
+                  </div>
+                )}
+                {Boolean(task.submission?.claims.length) && (
+                  <div className="section">
+                    <div className="section-label">Citations</div>
+                    <ul className="citations">
+                      {task.submission?.claims.map((citation, index) => {
+                        const result = task.grade?.citations[index];
+                        return (
+                          <li key={citation.text} className="citation">
+                            <div className="citation-head">
+                              <span>{citation.text}</span>
+                              {result && <Badge status={result.verdict} />}
+                            </div>
+                            <a
+                              className="citation-src"
+                              href={citation.url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {citation.url}
+                            </a>
+                            {result?.quote && (
+                              <blockquote className="quote">{result.quote}</blockquote>
+                            )}
+                            {result?.reason && (
+                              <p className="rubric-reason">{result.reason}</p>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
                 )}
                 <div className="case-actions">
                   {canAccept && (
@@ -619,12 +710,17 @@ export default function Desk() {
                   )}
                   {['working', 'needs_work', 'rejected'].includes(task.status) &&
                     isAgent && (
-                      <Button disabled={disabled} onClick={() => setModal('submit')}>
+                      <Button
+                        className="primary-action"
+                        disabled={disabled}
+                        onClick={() => setModal('submit')}
+                      >
                         Submit deliverable
                       </Button>
                     )}
                   {task.status === 'grading' && (isRequester || isAgent) && (
                     <Button
+                      className="primary-action"
                       disabled={disabled}
                       onClick={() =>
                         run('Grading delivery', () =>
@@ -637,6 +733,7 @@ export default function Desk() {
                   )}
                   {task.status === 'accepted' && isAgent && (
                     <Button
+                      className="primary-action"
                       disabled={disabled}
                       onClick={() =>
                         run('Claiming payout', () =>
@@ -670,7 +767,9 @@ export default function Desk() {
                     <Button
                       variant="ghost"
                       onClick={() =>
-                        setTasks((prev) => prev.filter((row) => row.id !== task.id))
+                        setTasks((prev) =>
+                          prev.filter((row) => row.id !== task.id),
+                        )
                       }
                     >
                       <Trash2 /> Discard draft
@@ -682,9 +781,10 @@ export default function Desk() {
           </section>
         </div>
         <footer className="desk-footer">
-          <span>Agenthon</span>
+          <span>Agenthon · agent work with portable reputation</span>
           <span>
-            Grading by GenLayer validators · scores are portable, not per-platform
+            Graded by GenLayer validators · the score belongs to the contract,
+            not to a platform
           </span>
         </footer>
       </main>
@@ -708,7 +808,10 @@ export default function Desk() {
           />
         </DialogContent>
       </Dialog>
-      <Dialog open={modal === 'submit'} onOpenChange={(open) => !open && setModal(null)}>
+      <Dialog
+        open={modal === 'submit'}
+        onOpenChange={(open) => !open && setModal(null)}
+      >
         <DialogContent className="desk-dialog">
           <DialogHeader>
             <DialogTitle>Submit deliverable</DialogTitle>
@@ -733,7 +836,10 @@ export default function Desk() {
           />
         </DialogContent>
       </Dialog>
-      <Dialog open={modal === 'network'} onOpenChange={(open) => !open && setModal(null)}>
+      <Dialog
+        open={modal === 'network'}
+        onOpenChange={(open) => !open && setModal(null)}
+      >
         <DialogContent className="desk-dialog">
           <DialogHeader>
             <DialogTitle>GenLayer connection</DialogTitle>
@@ -757,7 +863,8 @@ export default function Desk() {
             }}
             onDeploy={(next) =>
               run('Deploying Agenthon', async () => {
-                if (pending) throw new Error('Track the pending transaction first.');
+                if (pending)
+                  throw new Error('Track the pending transaction first.');
                 const hash = await deploy(next, walletSession(), setFeeQuote);
                 const p: Pending = { hash, action: 'deploy', config: next };
                 setPending(p);
