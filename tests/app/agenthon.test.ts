@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  acceptGate,
   formatAmount,
   fundedEligibility,
   newDraft,
@@ -146,4 +147,47 @@ void test('malformed drafts are dropped instead of restored', () => {
   assert.equal(restoreDrafts('not an array').length, 0);
   assert.equal(validAddress('0x0000000000000000000000000000000000000000'), false);
   assert.equal(validAddress('0x1111111111111111111111111111111111111111'), true);
+});
+
+function record(over: Partial<AgentRecord> = {}): AgentRecord {
+  return {
+    graded: 0,
+    accepted: 0,
+    score_sum: 0,
+    average: 0,
+    earned_wei: '0',
+    trusted: false,
+    restricted: false,
+    ...over,
+  };
+}
+
+void test('acceptGate lets a fresh agent take unfunded work', () => {
+  assert.equal(acceptGate('0', record()), null);
+});
+
+void test('acceptGate blocks funded work without a proven record', () => {
+  assert.match(acceptGate('10000000000000000', record()) ?? '', /proven record/);
+  assert.match(
+    acceptGate('10000000000000000', record({ graded: 1, average: 50 })) ?? '',
+    /proven record/,
+  );
+});
+
+void test('acceptGate blocks a restricted reputation from funded work', () => {
+  assert.match(
+    acceptGate('1', record({ graded: 2, average: 40, restricted: true })) ?? '',
+    /Reputation too low/,
+  );
+});
+
+void test('acceptGate allows funded work once the record qualifies', () => {
+  assert.equal(
+    acceptGate('10000000000000000', record({ graded: 1, average: 70 })),
+    null,
+  );
+});
+
+void test('acceptGate defers to the contract when no record is loaded', () => {
+  assert.equal(acceptGate('10000000000000000', null), null);
 });

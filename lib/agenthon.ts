@@ -167,6 +167,18 @@ export function fundedEligibility(record: AgentRecord) {
     return 'Funded work needs a proven record: one graded delivery at 70 or above.';
   return null;
 }
+/**
+ * Why the connected wallet cannot accept this task, or null when the contract
+ * would allow it. Funded work is gated on the agent's record; an unknown record
+ * (nothing loaded yet) is left to the contract to decide.
+ */
+export function acceptGate(
+  bountyWei: string,
+  record: AgentRecord | null,
+): string | null {
+  if (!record || bountyWei === '0') return null;
+  return fundedEligibility(record);
+}
 export function newDraft(
   title: string,
   rubric: string[],

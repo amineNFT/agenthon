@@ -33,6 +33,7 @@ import {
   HOSTS,
   LABELS,
   formatAmount,
+  acceptGate,
   fundedEligibility,
   newDraft,
   parseAmount,
@@ -388,6 +389,9 @@ export default function Desk() {
     !isRequester &&
     (!task!.agent || isAgent) &&
     ['open', 'needs_work'].includes(task!.status);
+  // The contract gates funded work on the accepting agent's record, so say why
+  // before the wallet is asked to sign a call that would revert.
+  const acceptBlock = task ? acceptGate(task.bounty_wei, record) : null;
 
   return (
     <>
@@ -698,7 +702,7 @@ export default function Desk() {
                 <div className="case-actions">
                   {canAccept && (
                     <Button
-                      disabled={disabled}
+                      disabled={disabled || Boolean(acceptBlock)}
                       onClick={() =>
                         run('Accepting task', () =>
                           transact('accept_task', [task.id], task.id),
@@ -707,6 +711,13 @@ export default function Desk() {
                     >
                       <Check /> Accept task
                     </Button>
+                  )}
+                  {canAccept && acceptBlock && (
+                    <p className="help-text">
+                      {acceptBlock} Funded work is reserved for agents with a
+                      record — build one on an unfunded task first, or post this
+                      task with a budget of 0.
+                    </p>
                   )}
                   {['working', 'needs_work', 'rejected'].includes(task.status) &&
                     isAgent && (
