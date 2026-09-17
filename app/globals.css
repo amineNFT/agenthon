@@ -1152,3 +1152,19 @@ a {
     display: block !important;
   }
 }
+
+/* Header brand: the product name over its one-line description. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand > div {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.brand span {
+  font-size: 12px;
+  color: #6f6a5c;
+}
