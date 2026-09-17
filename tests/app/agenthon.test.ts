@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  citationUrl,
   formatAmount,
   newDraft,
   parseAmount,
@@ -148,5 +149,21 @@ void test('a citation must point at the page that states the claim', () => {
   );
   assert.doesNotThrow(() =>
     validateCitations([{ ...claim, url: 'https://react.dev/reference/react/useState' }]),
+  );
+});
+
+void test('the citation form composes host and path without losing either', () => {
+  // The two fields used to share one string, so typing a path first cleared the
+  // host select and the submission came back unsupported.
+  assert.equal(citationUrl('https://react.dev', '/reference/react/useState'),
+    'https://react.dev/reference/react/useState');
+  assert.equal(citationUrl('https://react.dev', 'reference/react/useState'),
+    'https://react.dev/reference/react/useState');
+  assert.equal(citationUrl('https://react.dev/', ''), 'https://react.dev/');
+  assert.equal(citationUrl('', '/reference/react/useState'), '');
+  assert.doesNotThrow(() =>
+    validateCitations([
+      { text: 'useState is a React Hook that lets you add a state variable.', url: citationUrl('https://react.dev', '/reference/react/useState') },
+    ]),
   );
 });

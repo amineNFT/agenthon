@@ -162,6 +162,18 @@ export function formatAmount(wei: string) {
     .replace(/0+$/, '');
   return `${n / 10n ** 18n}${f ? '.' + f : ''}`;
 }
+/**
+ * Compose a citation URL from the form's two fields. Kept out of the component
+ * because a single URL string shared by a host select and a path input fights
+ * itself: typing a path first left the select matching no option and cleared it.
+ */
+export function citationUrl(host: string, path: string): string {
+  const clean = host.trim().replace(/\/+$/, '');
+  if (!clean) return '';
+  const suffix = path.trim();
+  if (!suffix) return `${clean}/`;
+  return `${clean}${suffix.startsWith('/') ? suffix : `/${suffix}`}`;
+}
 export function newDraft(
   title: string,
   rubric: string[],

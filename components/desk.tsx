@@ -29,6 +29,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  citationUrl,
   HOSTS,
   LABELS,
   formatAmount,
@@ -897,10 +898,13 @@ function DeliveryForm({
   onSave: (summary: string, claims: Citation[]) => void;
 }) {
   const [summary, setSummary] = useState('');
-  const [claims, setClaims] = useState<Citation[]>([{ text: '', url: '' }]);
+  // Host and path are separate fields: one URL string shared by both fought
+  // itself and cleared the select as soon as a path was typed.
+  type Row = { text: string; host: string; path: string };
+  const [rows, setRows] = useState<Row[]>([{ text: '', host: '', path: '' }]);
   const [error, setError] = useState('');
-  const update = (index: number, patch: Partial<Citation>) =>
-    setClaims((prev) =>
+  const update = (index: number, patch: Partial<Row>) =>
+    setRows((prev) =>
       prev.map((row, position) => (position === index ? { ...row, ...patch } : row)),
     );
   return (
@@ -915,7 +919,7 @@ function DeliveryForm({
           placeholder="useState returns an array with exactly two values: the current state and its set function."
         />
       </label>
-      {claims.map((claim, index) => (
+      {rows.map((claim, index) => (
         <fieldset key={index}>
           <p className="help-text">
             Cite the page that states the claim, not the site root: validators
@@ -935,12 +939,12 @@ function DeliveryForm({
             Source
             <select
               id={`citation-url-${index}`}
-              value={claim.url}
-              onChange={(e) => update(index, { url: e.target.value })}
+              value={claim.host}
+              onChange={(e) => update(index, { host: e.target.value })}
             >
               <option value="">Choose an approved documentation host…</option>
               {HOSTS.map((host) => (
-                <option key={host} value={`https://${host}/`}>
+                <option key={host} value={`https://${host}`}>
                   {host}
                 </option>
               ))}
@@ -950,27 +954,25 @@ function DeliveryForm({
             Path on that host
             <Input
               id={`citation-path-${index}`}
-              value={claim.url.replace(/^https:\/\/[^/]+/, '')}
-              onChange={(e) =>
-                update(index, {
-                  url: `${claim.url.replace(/(^https:\/\/[^/]+).*/, '$1')}${e.target.value}`,
-                })
-              }
+              value={claim.path}
+              onChange={(e) => update(index, { path: e.target.value })}
               placeholder="/reference/react/useState"
             />
           </label>
         </fieldset>
       ))}
       <div className="dialog-actions">
-        {claims.length > 1 && (
-          <Button variant="ghost" onClick={() => setClaims((prev) => prev.slice(0, -1))}>
+        {rows.length > 1 && (
+          <Button variant="ghost" onClick={() => setRows((prev) => prev.slice(0, -1))}>
             Remove last
           </Button>
         )}
-        {claims.length < 3 && (
+        {rows.length < 3 && (
           <Button
             variant="ghost"
-            onClick={() => setClaims((prev) => [...prev, { text: '', url: '' }])}
+            onClick={() =>
+              setRows((prev) => [...prev, { text: '', host: '', path: '' }])
+            }
           >
             Add citation
           </Button>
@@ -983,7 +985,12 @@ function DeliveryForm({
           try {
             if (summary.trim().length < 20 || summary.trim().length > 2000)
               throw new Error('Write 20 to 2000 characters.');
-            const complete = claims.filter((row) => row.text.trim() && row.url.trim());
+            const complete = rows
+              .filter((row) => row.text.trim() && row.host)
+              .map((row) => ({
+                text: row.text.trim(),
+                url: citationUrl(row.host, row.path),
+              }));
             validateCitations(complete);
             onSave(summary.trim(), complete);
           } catch (e) {
