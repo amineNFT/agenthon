@@ -1,0 +1,12 @@
+.keys/
+.venv/
+artifacts/
+work/
+outputs/
+dist/
+.wrangler/
+.vinext/
+.pytest_cache/
+**/__pycache__/
+*.tsbuildinfo
+.env*

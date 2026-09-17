@@ -1,0 +1,1035 @@
+'use client';
+import { errorMessage } from '@/lib/errors';
+import { filterWorkspace, restoreDrafts } from '@/lib/workspace';
+import {
+  discoverWallets,
+  preferredWallet,
+  type WalletOption,
+  type WalletSession,
+} from '@/lib/wallet';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ArrowDownToLine,
+  Check,
+  Plus,
+  RefreshCw,
+  Settings2,
+  Star,
+  Trash2,
+  Wallet,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  HOSTS,
+  LABELS,
+  formatAmount,
+  fundedEligibility,
+  newDraft,
+  parseAmount,
+  taskReceiptMarkdown,
+  validateCitations,
+  validateTask,
+  validAddress,
+  type AgentRecord,
+  type Citation,
+  type Task,
+} from '@/lib/agenthon';
+import {
+  deploy,
+  listTasks,
+  readAgent,
+  readTask,
+  send,
+  track,
+  walletClient,
+  networks,
+  type ChainConfig,
+  type Pending,
+} from '@/lib/chain';
+import deployment from '@/lib/deployment.json';
+import { FinalizedFailure } from '@/lib/receipt';
+import { feeUsage, type FeeUsage } from '@/lib/fees';
+import { FeeReceipt, formatGen } from '@genlayer/transaction-kit-react';
+import type { PolicyQuote } from '@genlayer/transaction-kit';
+
+const CONFIG_KEY = 'agenthon:network:v1',
+  DRAFT_KEY = 'agenthon:drafts:v1',
+  PENDING_KEY = 'agenthon:pending:v1';
+const initialConfig: ChainConfig = {
+  network: deployment.network as ChainConfig['network'],
+  contract: deployment.contract,
+};
+const short = (value: string) =>
+  validAddress(value)
+    ? `${value.slice(0, 6)}…${value.slice(-4)}`
+    : value || 'Not assigned';
+const daysLeft = (deadline: number, now: number) =>
+  Math.max(0, Math.ceil((deadline - now) / 86400));
+
+/** Deposit, consumed and refunded totals stay separate in the pending panel. */
+function feeUsageLine(usage: FeeUsage): string {
+  const part = (label: string, value: string | undefined) =>
+    value === undefined ? '' : `${label} ${formatGen(BigInt(value))} GEN`;
+  return [
+    part('Deposit', usage.deposit),
+    part('Consumed', usage.consumed),
+    part('Refunded', usage.refunded),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function Badge({ status }: { status: string }) {
+  return <span className={`status ${status}`}>{LABELS[status] ?? status}</span>;
+}
+
+function ErrorMessage({ message }: { message: string }) {
+  if (!message) return null;
+  return (
+    <div className="message error" role="alert">
+      <span>{errorMessage(message)}</span>
+    </div>
+  );
+}
+
+export default function Desk() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [selected, setSelected] = useState('');
+  const [scope, setScope] = useState<'mine' | 'all'>('mine');
+  const [query, setQuery] = useState('');
+  const [config, setConfig] = useState<ChainConfig>(initialConfig);
+  const [wallet, setWallet] = useState('');
+  const [walletOptions, setWalletOptions] = useState<WalletOption[]>([]);
+  const [selectedWallet, setSelectedWallet] = useState<WalletOption | null>(null);
+  const [modal, setModal] = useState<'new' | 'submit' | 'network' | null>(null);
+  const [busy, setBusy] = useState('');
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [feeQuote, setFeeQuote] = useState<PolicyQuote | null>(null);
+  const [feeUsed, setFeeUsed] = useState<FeeUsage | null>(null);
+  const [record, setRecord] = useState<AgentRecord | null>(null);
+  const [more, setMore] = useState(false);
+  const [now, setNow] = useState(0);
+  const lock = useRef(false);
+  const autoConnect = useRef(false);
+  const visible = filterWorkspace(tasks, wallet, scope, query);
+  const task = visible.find((row) => row.id === selected) ?? visible[0];
+  const disabled = Boolean(busy) || !config.contract;
+
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => setNow(Math.floor(Date.now() / 1000)),
+      30000,
+    );
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    // Deferred so restoring the workspace is not a synchronous state update in
+    // an effect body; localStorage is the external system here.
+    queueMicrotask(() => {
+      try {
+        const saved = localStorage.getItem(DRAFT_KEY);
+        if (saved) setTasks(restoreDrafts(JSON.parse(saved)));
+        const network = localStorage.getItem(CONFIG_KEY);
+        if (network) {
+          const parsed = JSON.parse(network);
+          if (
+            ['studioDevnet', 'testnetBradbury'].includes(parsed.network) &&
+            (!parsed.contract || validAddress(parsed.contract))
+          )
+            setConfig(parsed);
+        }
+        const current = localStorage.getItem(PENDING_KEY);
+        if (current) {
+          const parsed = JSON.parse(current);
+          if (
+            /^0x[a-fA-F0-9]{64}$/.test(parsed.hash) &&
+            ['studioDevnet', 'testnetBradbury'].includes(parsed.config?.network)
+          )
+            setPending(parsed);
+        }
+      } catch {
+        setError('Saved workspace data could not be read.');
+      }
+      setReady(true);
+      setNow(Math.floor(Date.now() / 1000));
+    });
+  }, []);
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      localStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify(tasks.filter((row) => row.origin === 'draft')),
+      );
+    } catch {
+      /* Drafts stay in memory. */
+    }
+  }, [tasks, ready]);
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      if (pending) localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+      else localStorage.removeItem(PENDING_KEY);
+    } catch {
+      queueMicrotask(() => setError('Could not save the transaction ID.'));
+    }
+  }, [pending, ready]);
+  useEffect(() => {
+    let active = true;
+    const cleanup = discoverWallets(window, (options) => {
+      queueMicrotask(() => {
+        if (active) setWalletOptions(options);
+      });
+    });
+    return () => {
+      active = false;
+      cleanup();
+    };
+  }, []);
+  async function connectWallet(option?: WalletOption) {
+    const target = option ?? preferredWallet(walletOptions);
+    if (!target) {
+      setError(
+        'No browser wallet was detected. Install Rabby or MetaMask, enable it for this site, and reload.',
+      );
+      return;
+    }
+    await run(`Connecting ${target.name}`, async () => {
+      setWallet('');
+      const connected = await walletClient(config, target.provider);
+      setSelectedWallet(target);
+      setWallet(connected.address);
+      setNotice(`Connected ${target.name}: ${short(connected.address)}.`);
+    });
+  }
+  function disconnectWallet() {
+    setWallet('');
+    setSelectedWallet(null);
+    setRecord(null);
+    setNotice('Wallet disconnected from Agenthon.');
+  }
+  // Connect as soon as a wallet is detected; a declined request only sets a notice.
+  useEffect(() => {
+    if (!ready || wallet || autoConnect.current || !walletOptions.length) return;
+    const target = preferredWallet(walletOptions);
+    if (!target) return;
+    autoConnect.current = true;
+    queueMicrotask(() => {
+      void (async () => {
+        setBusy('Connecting wallet');
+        try {
+          const connected = await walletClient(config, target.provider);
+          setSelectedWallet(target);
+          setWallet(connected.address);
+          setNotice(`Connected ${target.name}: ${short(connected.address)}.`);
+        } catch {
+          setNotice(
+            'Wallet connection was not approved. Use Connect wallet when you are ready.',
+          );
+        } finally {
+          setBusy('');
+        }
+      })();
+    });
+  }, [ready, wallet, walletOptions, config]);
+  useEffect(() => {
+    if (!wallet || !config.contract) {
+      queueMicrotask(() => setRecord(null));
+      return;
+    }
+    let active = true;
+    void readAgent(config, wallet)
+      .then((next) => {
+        if (active) setRecord(next);
+      })
+      .catch(() => {
+        if (active) setRecord(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [wallet, config]);
+
+  function walletSession(): WalletSession {
+    if (!selectedWallet || !wallet)
+      throw new Error('Connect your wallet first.');
+    return { provider: selectedWallet.provider, address: wallet };
+  }
+  async function run(label: string, work: () => Promise<void>) {
+    if (lock.current) return;
+    lock.current = true;
+    setBusy(label);
+    setError('');
+    try {
+      await work();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      lock.current = false;
+      setBusy('');
+    }
+  }
+  function replace(next: Task) {
+    setTasks((prev) =>
+      prev.some((row) => row.id === next.id && row.origin === 'chain')
+        ? prev.map((row) =>
+            row.id === next.id && row.origin === 'chain' ? next : row,
+          )
+        : [...prev.filter((row) => !(row.id === next.id && row.origin === 'draft')), next],
+    );
+    setSelected(next.id);
+  }
+  async function refresh(append = false) {
+    const offset = append ? tasks.filter((row) => row.origin === 'chain').length : 0;
+    const result = await listTasks(config, offset);
+    setTasks((prev) => [
+      ...prev.filter((row) => row.origin !== 'chain' || append),
+      ...result.tasks.filter(
+        (row, index, all) =>
+          all.findIndex((other) => other.id === row.id) === index &&
+          (!append || !prev.some((old) => old.origin === 'chain' && old.id === row.id)),
+      ),
+    ]);
+    setMore(result.hasMore);
+    setNotice(
+      result.tasks.length
+        ? `${result.tasks.length} network tasks loaded.`
+        : 'No tasks have been posted to this contract yet.',
+    );
+  }
+  async function complete(p: Pending) {
+    let receipt;
+    try {
+      receipt = await track(p);
+    } catch (e) {
+      if (e instanceof FinalizedFailure) setPending(null);
+      throw e;
+    }
+    setFeeUsed(feeUsage(receipt) ?? null);
+    if (p.action === 'deploy') {
+      const address =
+        receipt.data?.contract_address ?? receipt.to_address ?? receipt.recipient;
+      if (typeof address !== 'string' || !validAddress(address))
+        throw new Error(
+          'Deployment finalized, but the contract address could not be read. Keep this transaction ID.',
+        );
+      const next = { ...p.config, contract: address };
+      setConfig(next);
+      setNotice(`Contract deployed: ${address}`);
+    } else if (p.taskId) {
+      const current = await readTask(p.config, p.taskId);
+      replace(current);
+      setNotice('The transaction finalized. The record below comes from the contract.');
+      if (wallet) setRecord(await readAgent(p.config, wallet).catch(() => null));
+    }
+    setPending(null);
+  }
+  async function transact(action: string, args: (string | number)[], id: string, value = 0n) {
+    if (pending)
+      throw new Error('Track the pending transaction before submitting another.');
+    const hash = await send(config, walletSession(), action, args, value, setFeeQuote);
+    const p: Pending = { hash, action, taskId: id, config: { ...config } };
+    setPending(p);
+    localStorage.setItem(PENDING_KEY, JSON.stringify(p));
+    await complete(p);
+  }
+  async function createTask(form: {
+    title: string;
+    rubric: string[];
+    days: number;
+    bounty: string;
+  }) {
+    const draft = newDraft(form.title, form.rubric, form.days, form.bounty);
+    if (!wallet) {
+      setTasks((prev) => [...prev, draft]);
+      setSelected(draft.id);
+      setModal(null);
+      setNotice('Draft saved on this device. Connect a wallet to post it.');
+      return;
+    }
+    const next = { ...draft, requester: wallet };
+    await transact(
+      'create_task',
+      [next.id, next.title, JSON.stringify(next.rubric), form.days],
+      next.id,
+      parseAmount(form.bounty),
+    );
+  }
+  function exportReceipt() {
+    if (!task) return;
+    const markdown = taskReceiptMarkdown(task, record ?? undefined);
+    const url = URL.createObjectURL(
+      new Blob([markdown], { type: 'text/markdown' }),
+    );
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${task.id}.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+  const isRequester = Boolean(task && wallet && task.requester === wallet.toLowerCase());
+  const isAgent = Boolean(task && wallet && task.agent === wallet.toLowerCase());
+  const canAccept =
+    Boolean(task) &&
+    Boolean(wallet) &&
+    !isRequester &&
+    (!task!.agent || isAgent) &&
+    ['open', 'needs_work'].includes(task!.status);
+
+  return (
+    <>
+      <header className="site-header">
+        <div className="brand">
+          <Star size={18} />
+          <div>
+            <strong>Agenthon</strong>
+            <span>Agent work, graded by consensus</span>
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          disabled={Boolean(busy)}
+          onClick={() => {
+            setError('');
+            if (wallet) disconnectWallet();
+            else void connectWallet();
+          }}
+        >
+          <Wallet />
+          {wallet ? `${selectedWallet?.name ?? 'Wallet'} · ${short(wallet)}` : 'Connect wallet'}
+        </Button>
+      </header>
+      <main className="desk">
+        <div className="page-heading">
+          <div>
+            <h1>Agent workbench</h1>
+            <p className="lede">
+              Post a task with a rubric. An agent delivers. Validators grade the
+              work and the score follows that agent everywhere.
+            </p>
+          </div>
+          <Button className="primary-action" onClick={() => setModal('new')}>
+            <Plus /> New task
+          </Button>
+        </div>
+        <div className="workspace-bar">
+          <div>
+            {config.network === 'studioDevnet'
+              ? 'GenLayer Studio Next'
+              : 'Bradbury testnet'}
+            <span className="bar-divider">·</span>
+            <span>
+              {config.contract ? 'Test network · Test tokens only' : 'Contract not configured'}
+            </span>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => setModal('network')}>
+            <Settings2 /> Network settings
+          </Button>
+        </div>
+        {notice && (
+          <output className="message notice">
+            <span>{notice}</span>
+            <button aria-label="Dismiss notice" onClick={() => setNotice('')}>
+              ×
+            </button>
+          </output>
+        )}
+        <ErrorMessage message={error} />
+        {record && (
+          <div className="pending-box">
+            <div>
+              <strong>Your agent record</strong>
+              <p>
+                Graded deliveries {record.graded} · accepted {record.accepted} · average{' '}
+                {record.average}/100 · earned {formatAmount(record.earned_wei)} GEN
+              </p>
+              <p>
+                {record.trusted
+                  ? 'Trusted agent: funded work is open to you.'
+                  : fundedEligibility(record) ?? 'Eligible for funded work.'}
+              </p>
+            </div>
+          </div>
+        )}
+        {pending && (
+          <div className="pending-box">
+            <div>
+              <strong>Transaction submitted</strong>
+              <p>
+                {pending.action.replaceAll('_', ' ')} · {pending.config.network}
+              </p>
+              <code>{pending.hash}</code>
+              <p>Keep this ID. A timeout does not mean the transaction failed.</p>
+              {feeQuote && <FeeReceipt quote={feeQuote} busy={Boolean(busy)} />}
+              {feeUsed && <p>{feeUsageLine(feeUsed)}</p>}
+            </div>
+            <Button
+              variant="outline"
+              disabled={Boolean(busy)}
+              onClick={() => run('Checking transaction', () => complete(pending))}
+            >
+              <RefreshCw /> Check status
+            </Button>
+          </div>
+        )}
+        <div className="workbench">
+          <aside className="brief-list">
+            <Tabs
+              value={scope}
+              onValueChange={(value) => setScope(value as 'mine' | 'all')}
+            >
+              <TabsList>
+                <TabsTrigger value="mine">My tasks</TabsTrigger>
+                <TabsTrigger value="all">All tasks</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search tasks"
+              aria-label="Search tasks"
+            />
+            <Button
+              variant="ghost"
+              className="load-briefs"
+              disabled={disabled}
+              onClick={() => void run('Loading network tasks', () => refresh(more))}
+            >
+              <RefreshCw /> {more ? 'Load more' : 'Load network tasks'}
+            </Button>
+            {visible.length ? (
+              visible.map((row) => (
+                <button
+                  key={`${row.origin}:${row.id}`}
+                  className={`brief-row ${task?.id === row.id ? 'active' : ''}`}
+                  onClick={() => setSelected(row.id)}
+                >
+                  <span>{row.title}</span>
+                  <Badge status={row.status} />
+                </button>
+              ))
+            ) : (
+              <p className="help-text">
+                No tasks yet. Create one, or load the records already on the
+                contract.
+              </p>
+            )}
+          </aside>
+          <section className="case">
+            {!task ? (
+              <p className="help-text">
+                Select a task, or create one to commission agent work.
+              </p>
+            ) : (
+              <>
+                <div className="case-topline">
+                  <span className="eyebrow">
+                    {task.origin === 'draft' ? 'LOCAL DRAFT' : 'CONTRACT RECORD'}
+                  </span>
+                  <Badge status={task.status} />
+                </div>
+                <h2>{task.title}</h2>
+                <p className="help-text">
+                  Requester {short(task.requester)} · Agent {short(task.agent)} ·
+                  Budget {formatAmount(task.bounty_wei)} GEN ·{' '}
+                  {daysLeft(task.deadline, now)} days left · delivery{' '}
+                  {task.revision}
+                </p>
+                <h3>Rubric</h3>
+                <ol className="criteria">
+                  {task.rubric.map((row, index) => {
+                    const graded = task.grade?.criteria.find((c) => c.index === index);
+                    return (
+                      <li key={row}>
+                        <span>{row}</span>
+                        {graded && (
+                          <span className={`band ${graded.band}`}>
+                            {LABELS[graded.band]} — {graded.reason}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ol>
+                {task.grade && (
+                  <div className="grade-box">
+                    <strong>
+                      Score {task.score}/100 · {LABELS[task.grade.decision]}
+                    </strong>
+                    <p>
+                      Graded by GenLayer validators against the rubric above.
+                    </p>
+                  </div>
+                )}
+                {task.submission && (
+                  <>
+                    <h3>Delivered summary</h3>
+                    <p>{task.submission.summary}</p>
+                    {task.submission.claims.length > 0 && (
+                      <>
+                        <h3>Citations</h3>
+                        <ul className="claims">
+                          {task.submission.claims.map((citation, index) => {
+                            const result = task.grade?.citations[index];
+                            return (
+                              <li key={citation.text}>
+                                <span>{citation.text}</span>
+                                <a href={citation.url} target="_blank" rel="noreferrer">
+                                  {citation.url}
+                                </a>
+                                {result && (
+                                  <span className={`status ${result.verdict}`}>
+                                    {LABELS[result.verdict]}
+                                    {result.quote ? ` — “${result.quote}”` : ''}
+                                  </span>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </>
+                    )}
+                  </>
+                )}
+                <div className="case-actions">
+                  {canAccept && (
+                    <Button
+                      disabled={disabled}
+                      onClick={() =>
+                        run('Accepting task', () =>
+                          transact('accept_task', [task.id], task.id),
+                        )
+                      }
+                    >
+                      <Check /> Accept task
+                    </Button>
+                  )}
+                  {['working', 'needs_work', 'rejected'].includes(task.status) &&
+                    isAgent && (
+                      <Button disabled={disabled} onClick={() => setModal('submit')}>
+                        Submit deliverable
+                      </Button>
+                    )}
+                  {task.status === 'grading' && (isRequester || isAgent) && (
+                    <Button
+                      disabled={disabled}
+                      onClick={() =>
+                        run('Grading delivery', () =>
+                          transact('grade_deliverable', [task.id], task.id),
+                        )
+                      }
+                    >
+                      Grade delivery
+                    </Button>
+                  )}
+                  {task.status === 'accepted' && isAgent && (
+                    <Button
+                      disabled={disabled}
+                      onClick={() =>
+                        run('Claiming payout', () =>
+                          transact('claim_payout', [task.id], task.id),
+                        )
+                      }
+                    >
+                      Claim payout
+                    </Button>
+                  )}
+                  {isRequester &&
+                    ['open', 'working', 'grading', 'rejected', 'needs_work'].includes(
+                      task.status,
+                    ) && (
+                      <Button
+                        variant="outline"
+                        disabled={disabled}
+                        onClick={() =>
+                          run('Refunding', () =>
+                            transact('refund_expired', [task.id], task.id),
+                          )
+                        }
+                      >
+                        Refund when expired
+                      </Button>
+                    )}
+                  <Button variant="ghost" onClick={exportReceipt}>
+                    Export report <ArrowDownToLine />
+                  </Button>
+                  {task.origin === 'draft' && (
+                    <Button
+                      variant="ghost"
+                      onClick={() =>
+                        setTasks((prev) => prev.filter((row) => row.id !== task.id))
+                      }
+                    >
+                      <Trash2 /> Discard draft
+                    </Button>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+        <footer className="desk-footer">
+          <span>Agenthon</span>
+          <span>
+            Grading by GenLayer validators · scores are portable, not per-platform
+          </span>
+        </footer>
+      </main>
+      <Dialog open={modal === 'new'} onOpenChange={(open) => !open && setModal(null)}>
+        <DialogContent className="desk-dialog">
+          <DialogHeader>
+            <DialogTitle>New task</DialogTitle>
+            <DialogDescription>
+              A rubric lets any validator grade the same delivery the same way.
+            </DialogDescription>
+          </DialogHeader>
+          <TaskForm
+            wallet={wallet}
+            disabled={Boolean(busy)}
+            onSave={(form) =>
+              run('Posting task', async () => {
+                await createTask(form);
+                setModal(null);
+              })
+            }
+          />
+        </DialogContent>
+      </Dialog>
+      <Dialog open={modal === 'submit'} onOpenChange={(open) => !open && setModal(null)}>
+        <DialogContent className="desk-dialog">
+          <DialogHeader>
+            <DialogTitle>Submit deliverable</DialogTitle>
+            <DialogDescription>
+              A summary and up to three citations. Validators fetch the sources
+              themselves.
+            </DialogDescription>
+          </DialogHeader>
+          <DeliveryForm
+            disabled={Boolean(busy)}
+            onSave={(summary, claims) =>
+              run('Submitting delivery', async () => {
+                if (!task) return;
+                await transact(
+                  'submit_deliverable',
+                  [task.id, summary, JSON.stringify(claims)],
+                  task.id,
+                );
+                setModal(null);
+              })
+            }
+          />
+        </DialogContent>
+      </Dialog>
+      <Dialog open={modal === 'network'} onOpenChange={(open) => !open && setModal(null)}>
+        <DialogContent className="desk-dialog">
+          <DialogHeader>
+            <DialogTitle>GenLayer connection</DialogTitle>
+            <DialogDescription>
+              Choose the network and Agenthon contract. Wallet signing stays in
+              your wallet.
+            </DialogDescription>
+          </DialogHeader>
+          <NetworkForm
+            config={config}
+            disabled={Boolean(busy)}
+            onSave={(next) => {
+              setConfig(next);
+              setWallet('');
+              setTasks((prev) => prev.filter((row) => row.origin !== 'chain'));
+              setSelected('');
+              setFeeQuote(null);
+              setFeeUsed(null);
+              setModal(null);
+              setNotice('Network settings saved.');
+            }}
+            onDeploy={(next) =>
+              run('Deploying Agenthon', async () => {
+                if (pending) throw new Error('Track the pending transaction first.');
+                const hash = await deploy(next, walletSession(), setFeeQuote);
+                const p: Pending = { hash, action: 'deploy', config: next };
+                setPending(p);
+                localStorage.setItem(PENDING_KEY, JSON.stringify(p));
+                await complete(p);
+                setModal(null);
+              })
+            }
+          />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function TaskForm({
+  wallet,
+  disabled,
+  onSave,
+}: {
+  wallet: string;
+  disabled: boolean;
+  onSave: (form: { title: string; rubric: string[]; days: number; bounty: string }) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [rubric, setRubric] = useState('');
+  const [days, setDays] = useState(7);
+  const [bounty, setBounty] = useState('0');
+  const [error, setError] = useState('');
+  return (
+    <div className="desk-form">
+      <label htmlFor="task-title">
+        Title
+        <Input
+          id="task-title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Explain what useState returns"
+          maxLength={160}
+        />
+      </label>
+      <label htmlFor="task-rubric">
+        Rubric, one criterion per line (1–4)
+        <Textarea
+          id="task-rubric"
+          value={rubric}
+          onChange={(e) => setRubric(e.target.value)}
+          rows={4}
+          placeholder={'State what useState returns.\nCite the official React docs.'}
+        />
+      </label>
+      <label htmlFor="task-days">
+        Days until the deadline
+        <Input
+          id="task-days"
+          type="number"
+          min={1}
+          max={30}
+          value={days}
+          onChange={(e) => setDays(Number(e.target.value))}
+        />
+      </label>
+      <label htmlFor="task-bounty">
+        Budget in GEN (0 keeps funded gating out of the demo)
+        <Input
+          id="task-bounty"
+          value={bounty}
+          onChange={(e) => setBounty(e.target.value)}
+          inputMode="decimal"
+        />
+      </label>
+      <ErrorMessage message={error} />
+      <p className="help-text">
+        {wallet
+          ? 'Posting sends a transaction from your connected wallet.'
+          : 'Saved as a device-local draft until you connect a wallet.'}
+      </p>
+      <Button
+        disabled={disabled}
+        onClick={() => {
+          const criteria = rubric.split('\n').map((row) => row.trim()).filter(Boolean);
+          try {
+            validateTask(title, criteria, days);
+            parseAmount(bounty);
+          } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+            return;
+          }
+          onSave({ title, rubric: criteria, days, bounty });
+        }}
+      >
+        {wallet ? 'Post task to GenLayer' : 'Save draft'}
+      </Button>
+    </div>
+  );
+}
+
+function DeliveryForm({
+  disabled,
+  onSave,
+}: {
+  disabled: boolean;
+  onSave: (summary: string, claims: Citation[]) => void;
+}) {
+  const [summary, setSummary] = useState('');
+  const [claims, setClaims] = useState<Citation[]>([{ text: '', url: '' }]);
+  const [error, setError] = useState('');
+  const update = (index: number, patch: Partial<Citation>) =>
+    setClaims((prev) =>
+      prev.map((row, position) => (position === index ? { ...row, ...patch } : row)),
+    );
+  return (
+    <div className="desk-form">
+      <label htmlFor="delivery-summary">
+        Deliverable summary (20–2000 characters)
+        <Textarea
+          id="delivery-summary"
+          value={summary}
+          onChange={(e) => setSummary(e.target.value)}
+          rows={6}
+          placeholder="useState returns an array with exactly two values: the current state and its set function."
+        />
+      </label>
+      {claims.map((claim, index) => (
+        <fieldset key={index}>
+          <label htmlFor={`citation-${index}`}>
+            Citation {index + 1}
+            <Input
+              id={`citation-${index}`}
+              value={claim.text}
+              onChange={(e) => update(index, { text: e.target.value })}
+              placeholder="A sentence the source states"
+              maxLength={400}
+            />
+          </label>
+          <label htmlFor={`citation-url-${index}`}>
+            Source
+            <select
+              id={`citation-url-${index}`}
+              value={claim.url}
+              onChange={(e) => update(index, { url: e.target.value })}
+            >
+              <option value="">Choose an approved documentation host…</option>
+              {HOSTS.map((host) => (
+                <option key={host} value={`https://${host}/`}>
+                  {host}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label htmlFor={`citation-path-${index}`}>
+            Path on that host
+            <Input
+              id={`citation-path-${index}`}
+              value={claim.url.replace(/^https:\/\/[^/]+/, '')}
+              onChange={(e) =>
+                update(index, {
+                  url: `${claim.url.replace(/(^https:\/\/[^/]+).*/, '$1')}${e.target.value}`,
+                })
+              }
+              placeholder="/reference/react/useState"
+            />
+          </label>
+        </fieldset>
+      ))}
+      <div className="dialog-actions">
+        {claims.length > 1 && (
+          <Button variant="ghost" onClick={() => setClaims((prev) => prev.slice(0, -1))}>
+            Remove last
+          </Button>
+        )}
+        {claims.length < 3 && (
+          <Button
+            variant="ghost"
+            onClick={() => setClaims((prev) => [...prev, { text: '', url: '' }])}
+          >
+            Add citation
+          </Button>
+        )}
+      </div>
+      <ErrorMessage message={error} />
+      <Button
+        disabled={disabled}
+        onClick={() => {
+          try {
+            if (summary.trim().length < 20 || summary.trim().length > 2000)
+              throw new Error('Write 20 to 2000 characters.');
+            const complete = claims.filter((row) => row.text.trim() && row.url.trim());
+            validateCitations(complete);
+            onSave(summary.trim(), complete);
+          } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+          }
+        }}
+      >
+        Submit deliverable
+      </Button>
+    </div>
+  );
+}
+
+function NetworkForm({
+  config,
+  disabled,
+  onSave,
+  onDeploy,
+}: {
+  config: ChainConfig;
+  disabled: boolean;
+  onSave: (config: ChainConfig) => void;
+  onDeploy: (config: ChainConfig) => void;
+}) {
+  const [next, setNext] = useState(config);
+  const [error, setError] = useState('');
+  return (
+    <div className="desk-form">
+      <Tabs
+        value={next.network}
+        onValueChange={(value) =>
+          setNext({ network: value as ChainConfig['network'], contract: '' })
+        }
+      >
+        <TabsList>
+          <TabsTrigger value="studioDevnet">Studio Next</TabsTrigger>
+          <TabsTrigger value="testnetBradbury">Bradbury testnet</TabsTrigger>
+        </TabsList>
+      </Tabs>
+      <label htmlFor="network-address">
+        Agenthon contract address
+        <Input
+          id="network-address"
+          value={next.contract}
+          onChange={(e) => setNext({ ...next, contract: e.target.value })}
+          placeholder="0x…"
+          maxLength={42}
+        />
+      </label>
+      <details className="field-hint">
+        <summary>Network details for manual setup</summary>
+        <p>
+          {networks[next.network].name} · Chain ID {networks[next.network].id} ·
+          Currency {networks[next.network].nativeCurrency.symbol}
+        </p>
+        <p>RPC: {networks[next.network].rpcUrls.default.http[0]}</p>
+      </details>
+      <ErrorMessage message={error} />
+      <Button
+        disabled={disabled}
+        onClick={() => {
+          if (next.contract && !validAddress(next.contract)) {
+            setError('Enter a valid contract address.');
+            return;
+          }
+          onSave(next);
+        }}
+      >
+        Save network
+      </Button>
+      <Button
+        variant="outline"
+        disabled={disabled}
+        onClick={() => {
+          setError('');
+          onDeploy(next);
+        }}
+      >
+        Deploy a new contract
+      </Button>
+      <p className="help-text">
+        Deploying uses the bundled Python source and your connected wallet. Each
+        write reserves a fee deposit, refunded for whatever it does not consume.
+      </p>
+    </div>
+  );
+}

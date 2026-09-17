@@ -1,0 +1,18 @@
+# GenLayer test runner networks.
+#
+# `npm test` and CI exercise the contract in direct mode, which needs no
+# network. Integration and fee-profile runs need a Studio; the hackathon
+# requires Studio Next (consensus v0.6).
+networks:
+  default: localnet
+
+  localnet:
+    url: "http://127.0.0.1:4000/api"
+
+  # Studio Next: chain 61997, RPC https://studio-dev.genlayer.com/api
+  studio_devnet: {}
+
+paths:
+  contracts: "contracts"
+
+environment: .env
