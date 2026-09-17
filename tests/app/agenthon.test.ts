@@ -133,3 +133,20 @@ void test('malformed drafts are dropped instead of restored', () => {
   assert.equal(validAddress('0x0000000000000000000000000000000000000000'), false);
   assert.equal(validAddress('0x1111111111111111111111111111111111111111'), true);
 });
+
+void test('a citation must point at the page that states the claim', () => {
+  // A site root is allowlisted by host but never states the claim, so validators
+  // come back unsupported and the criterion reads unmet.
+  const claim = { text: 'useState is a React Hook that lets you add a state variable.' };
+  assert.throws(
+    () => validateCitations([{ ...claim, url: 'https://react.dev/' }]),
+    /site root/,
+  );
+  assert.throws(
+    () => validateCitations([{ ...claim, url: 'https://react.dev' }]),
+    /site root/,
+  );
+  assert.doesNotThrow(() =>
+    validateCitations([{ ...claim, url: 'https://react.dev/reference/react/useState' }]),
+  );
+});

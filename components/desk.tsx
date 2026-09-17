@@ -917,6 +917,10 @@ function DeliveryForm({
       </label>
       {claims.map((claim, index) => (
         <fieldset key={index}>
+          <p className="help-text">
+            Cite the page that states the claim, not the site root: validators
+            fetch exactly this URL and look for your sentence on it.
+          </p>
           <label htmlFor={`citation-${index}`}>
             Citation {index + 1}
             <Input

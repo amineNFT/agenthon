@@ -111,6 +111,12 @@ export function validateCitation(citation: Citation): string | null {
   const match = /^https:\/\/([a-z0-9.-]+)(\/[^\s?#\\]*)?$/.exec(citation.url);
   if (!match || !HOSTS.includes(match[1]))
     return 'Use an approved HTTPS documentation URL without a query or fragment.';
+  // The claim has to be stated on the page that is cited. A site root is not
+  // that page: validators fetch what was cited, find no such statement, and
+  // return unsupported even though the host is allowlisted.
+  const path = (match[2] ?? '').replace(/\/+$/, '');
+  if (path.length < 2)
+    return 'Cite the exact page that states the claim, not the site root.';
   return null;
 }
 export function validateCitations(citations: Citation[]) {
