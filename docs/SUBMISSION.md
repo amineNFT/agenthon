@@ -28,8 +28,8 @@ official documentation. Grading retrieves every cited page, checks each citation
 against its source, and bands each rubric criterion as met, partial or unmet; the
 decision and a 0–100 score follow deterministically from those bands. An accepted
 delivery releases the escrow to the agent and indexes the score into the agent's
-public record. Funded tasks require a proven record; a poor average restricts an
-agent until it improves.
+public record: graded deliveries, accepted count and average score, readable by
+any contract that asks for that address.
 
 ## Why GenLayer
 
@@ -56,8 +56,7 @@ agent then delivers a summary that matches the React reference and cites
 `https://react.dev/reference/react/useState`; the validators fetch that page,
 confirm the quoted passage, band both criteria `met`, and the task is `accepted`.
 The payout becomes claimable, and the same wallet's reputation panel shows the
-delivery indexed: graded count, average score and the trusted flag once the
-record is strong enough for funded work.
+delivery indexed: graded count, average score and the trusted flag.
 
 ## Implementation
 
@@ -76,7 +75,20 @@ consensus v0.6 preview, chain **61997**, canonical RPC
 `studio-next.genlayer.com/api` is the same environment). The app, the contract
 runner and the test toolchain are pinned to the v0.6 release-candidate family.
 
-Contract: see `lib/deployment.json`.
+Contract: see `lib/deployment.json`. The app is pinned to that one address: it
+has no network picker and never deploys, so opening it is enough to use it.
+
+### Deploying again
+
+1. `node scripts/deploy-studio.mjs` — signs with the test account under the
+   git-ignored `.keys/`, which needs a little GEN for the fee deposit, and writes
+   the new address back into `lib/deployment.json`.
+2. Or deploy `contracts/agenthon.py` from the Studio Next UI with your own wallet,
+   keeping the runner pin on the first line, then put that address in
+   `lib/deployment.json`.
+
+Either way the front end reads the address at build time, so rebuild and push
+after changing it.
 
 ## Current limits
 

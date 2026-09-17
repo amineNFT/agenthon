@@ -161,23 +161,16 @@ def test_citation_urls_are_restricted(desk, direct_vm, direct_bob, url):
     with direct_vm.expect_revert():
         deliver(desk, direct_vm, direct_bob, claims=[{"text": "A citation pointing somewhere else.", "url": url}])
 
-def test_funded_work_requires_a_proven_record(desk, direct_vm, direct_bob):
-    # Zero-budget work is open to anyone; funded work is reserved for agents
-    # that have already delivered, which is what makes reputation load-bearing.
+def test_funded_work_is_open_to_any_agent(desk, direct_vm, direct_bob):
+    # A funded task must be acceptable by an address with no history, so anyone
+    # reviewing the app can fund a task and deliver it themselves.
     direct_vm.value = 100
     desk.create_task("task-funded", "Explain React state updates",
                      json.dumps(["State how set functions update state."]), 7)
-    with direct_vm.prank(direct_bob), direct_vm.expect_revert("requires a proven record"):
-        desk.accept_task("task-funded")
-    with direct_vm.prank(direct_bob):
-        desk.accept_task("task-001")
-    deliver(desk, direct_vm, direct_bob)
-    mock_grade(direct_vm)
-    desk.grade_deliverable("task-001")
-    assert agent_state(desk, direct_bob)["average"] == 100
     with direct_vm.prank(direct_bob):
         desk.accept_task("task-funded")
     assert state(desk, "task-funded")["agent"] == "0x" + direct_bob.hex()
+    assert state(desk, "task-funded")["status"] == "working"
 
 def test_expired_open_task_is_refunded(desk, direct_vm):
     with direct_vm.expect_revert("Refund is not available"):

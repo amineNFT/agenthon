@@ -14,8 +14,8 @@ GEN and refunds what it does not consume.
 
 1. `npm run dev:vercel`, then open the printed URL in a browser with the wallet installed.
 2. The app auto-connects to the detected wallet. Header shows `Rabby · 0x…`.
-3. **Network settings → Deploy a new contract** → approve. The workspace bar then
-   reads *GenLayer Studio Next* and shows no longer *Contract not configured*.
+3. The workspace bar already reads *GenLayer Studio Next* with the contract
+   address this build is pinned to. Nothing to configure.
 
 ## The walkthrough (zero budget, so no transfer is needed)
 
@@ -64,12 +64,11 @@ GEN and refunds what it does not consume.
 8. **Export report** → the Markdown file carries the rubric, the bands, the
    citation verdict and the agent's reputation numbers.
 
-**Stretch: reputation as a gate (funded work)**
+**Stretch: work with a budget**
 
 9. Post a second task with a small budget (e.g. `0.1`) and a third criterion.
-   - Expect: the same agent can now accept it, because account B has one accepted
-     delivery at 50 — reported as eligible once the average is 70 or above.
-     An agent with no graded work gets *Funded work needs a proven record*.
+   - Expect: any wallet can accept it, including a fresh one. Reputation does not
+     gate acceptance; it is the public record the grade is written into.
 10. **Claim payout** on that task does move test tokens; only run it if the
     wallet holds GEN, and treat a transfer failure as an unproven path on this
     release-candidate network rather than a bug in the app.

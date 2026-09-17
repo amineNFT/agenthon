@@ -13,7 +13,6 @@ import {
   Check,
   Plus,
   RefreshCw,
-  Settings2,
   Star,
   Trash2,
   Wallet,
@@ -33,8 +32,6 @@ import {
   HOSTS,
   LABELS,
   formatAmount,
-  acceptGate,
-  fundedEligibility,
   newDraft,
   parseAmount,
   taskReceiptMarkdown,
@@ -46,14 +43,12 @@ import {
   type Task,
 } from '@/lib/agenthon';
 import {
-  deploy,
   listTasks,
   readAgent,
   readTask,
   send,
   track,
   walletClient,
-  networks,
   type ChainConfig,
   type Pending,
 } from '@/lib/chain';
@@ -62,8 +57,7 @@ import { ConsensusFailure, FinalizedFailure } from '@/lib/receipt';
 import { feeUsage, type FeeUsage } from '@/lib/fees';
 import { formatGen } from '@genlayer/transaction-kit-react';
 
-const CONFIG_KEY = 'agenthon:network:v1',
-  DRAFT_KEY = 'agenthon:drafts:v1',
+const DRAFT_KEY = 'agenthon:drafts:v1',
   PENDING_KEY = 'agenthon:pending:v1';
 const initialConfig: ChainConfig = {
   network: deployment.network as ChainConfig['network'],
@@ -107,11 +101,10 @@ export default function Desk() {
   const [selected, setSelected] = useState('');
   const [scope, setScope] = useState<'mine' | 'all'>('mine');
   const [query, setQuery] = useState('');
-  const [config, setConfig] = useState<ChainConfig>(initialConfig);
   const [wallet, setWallet] = useState('');
   const [walletOptions, setWalletOptions] = useState<WalletOption[]>([]);
   const [selectedWallet, setSelectedWallet] = useState<WalletOption | null>(null);
-  const [modal, setModal] = useState<'new' | 'submit' | 'network' | null>(null);
+  const [modal, setModal] = useState<'new' | 'submit' | null>(null);
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -124,7 +117,9 @@ export default function Desk() {
   const autoConnect = useRef(false);
   const visible = filterWorkspace(tasks, wallet, scope, query);
   const task = visible.find((row) => row.id === selected) ?? visible[0];
-  const disabled = Boolean(busy) || !config.contract;
+  // One network, one contract: the address ships with the app.
+  const config = initialConfig;
+  const disabled = Boolean(busy);
 
   useEffect(() => {
     const timer = window.setInterval(
@@ -140,15 +135,6 @@ export default function Desk() {
       try {
         const saved = localStorage.getItem(DRAFT_KEY);
         if (saved) setTasks(restoreDrafts(JSON.parse(saved)));
-        const network = localStorage.getItem(CONFIG_KEY);
-        if (network) {
-          const parsed = JSON.parse(network);
-          if (
-            ['studioDevnet', 'testnetBradbury'].includes(parsed.network) &&
-            (!parsed.contract || validAddress(parsed.contract))
-          )
-            setConfig(parsed);
-        }
         const current = localStorage.getItem(PENDING_KEY);
         if (current) {
           const parsed = JSON.parse(current);
@@ -329,17 +315,7 @@ export default function Desk() {
       if (e instanceof ConsensusFailure) await pull(p).catch(() => undefined);
       throw e;
     }
-    if (p.action === 'deploy') {
-      const address =
-        receipt.data?.contract_address ?? receipt.to_address ?? receipt.recipient;
-      if (typeof address !== 'string' || !validAddress(address))
-        throw new Error(
-          'Deployment finalized, but the contract address could not be read. Keep this transaction ID.',
-        );
-      const next = { ...p.config, contract: address };
-      setConfig(next);
-      setNotice(`Contract deployed: ${address}`);
-    } else if (p.taskId) {
+    if (p.taskId) {
       await pull(p);
       const used = feeUsage(receipt);
       setNotice(
@@ -401,10 +377,6 @@ export default function Desk() {
     !isRequester &&
     (!task!.agent || isAgent) &&
     ['open', 'needs_work'].includes(task!.status);
-  // The contract gates funded work on the accepting agent's record, so say why
-  // before the wallet is asked to sign a call that would revert.
-  const acceptBlock = task ? acceptGate(task.bounty_wei, record) : null;
-
   return (
     <>
       <header className="topbar">
@@ -418,9 +390,6 @@ export default function Desk() {
           </div>
         </div>
         <div className="topbar-right">
-          <Button variant="outline" size="sm" onClick={() => setModal('network')}>
-            <Settings2 /> {config.contract ? 'Network' : 'Set contract'}
-          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -454,22 +423,12 @@ export default function Desk() {
         </div>
         <div className="workspace-bar">
           <div>
-            <span className={`net-dot ${config.contract ? '' : 'off'}`} />
-            <strong>
-              {config.network === 'studioDevnet'
-                ? 'GenLayer Studio Next'
-                : 'Bradbury testnet'}
-            </strong>
+            <span className="net-dot" />
+            <strong>GenLayer Studio Next</strong>
             <span className="bar-divider">·</span>
-            <span>
-              {config.contract
-                ? 'Test network · test tokens only'
-                : 'Contract not configured'}
-            </span>
+            <span>Test network · test tokens only</span>
           </div>
-          <span className="mono">
-            {config.contract ? short(config.contract) : 'no contract'}
-          </span>
+          <span className="mono">{config.contract}</span>
         </div>
         {notice && (
           <output className="message notice">
@@ -505,9 +464,8 @@ export default function Desk() {
               <span>GEN earned</span>
             </div>
             <p className="card-note">
-              {record.trusted
-                ? 'Funded work is open to this address on every task that reads it.'
-                : fundedEligibility(record) ?? 'Eligible for funded work.'}
+              Every grade is recorded against this address on the contract, so any
+              task that reads it sees the same numbers.
             </p>
           </div>
         )}
@@ -707,7 +665,7 @@ export default function Desk() {
                 <div className="case-actions">
                   {canAccept && (
                     <Button
-                      disabled={disabled || Boolean(acceptBlock)}
+                      disabled={disabled}
                       onClick={() =>
                         run('Accepting task', () =>
                           transact('accept_task', [task.id], task.id),
@@ -716,13 +674,6 @@ export default function Desk() {
                     >
                       <Check /> Accept task
                     </Button>
-                  )}
-                  {canAccept && acceptBlock && (
-                    <p className="help-text">
-                      {acceptBlock} Funded work is reserved for agents with a
-                      record — build one on an unfunded task first, or post this
-                      task with a budget of 0.
-                    </p>
                   )}
                   {['working', 'needs_work', 'rejected'].includes(task.status) &&
                     isAgent && (
@@ -846,44 +797,6 @@ export default function Desk() {
                   [task.id, summary, JSON.stringify(claims)],
                   task.id,
                 );
-                setModal(null);
-              })
-            }
-          />
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={modal === 'network'}
-        onOpenChange={(open) => !open && setModal(null)}
-      >
-        <DialogContent className="desk-dialog">
-          <DialogHeader>
-            <DialogTitle>GenLayer connection</DialogTitle>
-            <DialogDescription>
-              Choose the network and Agenthon contract. Wallet signing stays in
-              your wallet.
-            </DialogDescription>
-          </DialogHeader>
-          <NetworkForm
-            config={config}
-            disabled={Boolean(busy)}
-            onSave={(next) => {
-              setConfig(next);
-              setWallet('');
-              setTasks((prev) => prev.filter((row) => row.origin !== 'chain'));
-              setSelected('');
-              setModal(null);
-              setNotice('Network settings saved.');
-            }}
-            onDeploy={(next) =>
-              run('Deploying Agenthon', async () => {
-                if (pending)
-                  throw new Error('Track the pending transaction first.');
-                const hash = await deploy(next, walletSession());
-                const p: Pending = { hash, action: 'deploy', config: next };
-                setPending(p);
-                localStorage.setItem(PENDING_KEY, JSON.stringify(p));
-                await complete(p);
                 setModal(null);
               })
             }
@@ -1076,81 +989,6 @@ function DeliveryForm({
       >
         Submit deliverable
       </Button>
-    </div>
-  );
-}
-
-function NetworkForm({
-  config,
-  disabled,
-  onSave,
-  onDeploy,
-}: {
-  config: ChainConfig;
-  disabled: boolean;
-  onSave: (config: ChainConfig) => void;
-  onDeploy: (config: ChainConfig) => void;
-}) {
-  const [next, setNext] = useState(config);
-  const [error, setError] = useState('');
-  return (
-    <div className="desk-form">
-      <Tabs
-        value={next.network}
-        onValueChange={(value) =>
-          setNext({ network: value as ChainConfig['network'], contract: '' })
-        }
-      >
-        <TabsList>
-          <TabsTrigger value="studioDevnet">Studio Next</TabsTrigger>
-          <TabsTrigger value="testnetBradbury">Bradbury testnet</TabsTrigger>
-        </TabsList>
-      </Tabs>
-      <label htmlFor="network-address">
-        Agenthon contract address
-        <Input
-          id="network-address"
-          value={next.contract}
-          onChange={(e) => setNext({ ...next, contract: e.target.value })}
-          placeholder="0x…"
-          maxLength={42}
-        />
-      </label>
-      <details className="field-hint">
-        <summary>Network details for manual setup</summary>
-        <p>
-          {networks[next.network].name} · Chain ID {networks[next.network].id} ·
-          Currency {networks[next.network].nativeCurrency.symbol}
-        </p>
-        <p>RPC: {networks[next.network].rpcUrls.default.http[0]}</p>
-      </details>
-      <ErrorMessage message={error} />
-      <Button
-        disabled={disabled}
-        onClick={() => {
-          if (next.contract && !validAddress(next.contract)) {
-            setError('Enter a valid contract address.');
-            return;
-          }
-          onSave(next);
-        }}
-      >
-        Save network
-      </Button>
-      <Button
-        variant="outline"
-        disabled={disabled}
-        onClick={() => {
-          setError('');
-          onDeploy(next);
-        }}
-      >
-        Deploy a new contract
-      </Button>
-      <p className="help-text">
-        Deploying uses the bundled Python source and your connected wallet. Each
-        write reserves a fee deposit, refunded for whatever it does not consume.
-      </p>
     </div>
   );
 }

@@ -156,29 +156,6 @@ export function formatAmount(wei: string) {
     .replace(/0+$/, '');
   return `${n / 10n ** 18n}${f ? '.' + f : ''}`;
 }
-/** Whether an agent may take funded work, mirrors the contract's gate. */
-export function fundedEligibility(record: AgentRecord) {
-  if (record.restricted)
-    return 'Reputation too low for funded work: raise the average above 50.';
-  if (
-    record.graded < FUNDED_MIN_GRADED ||
-    record.average < FUNDED_MIN_AVERAGE
-  )
-    return 'Funded work needs a proven record: one graded delivery at 70 or above.';
-  return null;
-}
-/**
- * Why the connected wallet cannot accept this task, or null when the contract
- * would allow it. Funded work is gated on the agent's record; an unknown record
- * (nothing loaded yet) is left to the contract to decide.
- */
-export function acceptGate(
-  bountyWei: string,
-  record: AgentRecord | null,
-): string | null {
-  if (!record || bountyWei === '0') return null;
-  return fundedEligibility(record);
-}
 export function newDraft(
   title: string,
   rubric: string[],

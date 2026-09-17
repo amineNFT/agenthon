@@ -27,8 +27,6 @@ ALLOWED_HOSTS = (
 )
 
 # Reputation policy. Funded work is reserved for agents that have delivered before.
-FUNDED_MIN_GRADED = 1
-FUNDED_MIN_AVERAGE = 70
 RESTRICTED_AVERAGE = 50
 TRUSTED_MIN_GRADED = 3
 TRUSTED_MIN_AVERAGE = 80
@@ -199,13 +197,8 @@ class Agenthon(gl.contract.Contract):
             raise gl.vm.UserError("Another agent already accepted this task")
         if int(datetime.now(timezone.utc).timestamp()) >= task["deadline"]:
             raise gl.vm.UserError("The deadline has passed")
-        # Funded work is reserved for agents with a record; unpaid work is open.
-        if int(task["bounty_wei"]) > 0:
-            agent = _reputation(self._agent(sender))
-            if agent["restricted"]:
-                raise gl.vm.UserError("Reputation too low for funded work")
-            if agent["graded"] < FUNDED_MIN_GRADED or agent["average"] < FUNDED_MIN_AVERAGE:
-                raise gl.vm.UserError("Funded work requires a proven record")
+        # Acceptance is open to any address, funded or not. Reputation is a
+        # public record of past grades rather than a gate on taking work.
         task["agent"] = sender
         if task["status"] == "open":
             task["status"] = "working"

@@ -21,8 +21,7 @@ tolerating wording-level differences that would otherwise stall the round.
 ## The loop
 
 1. A requester posts a task: title, 1–4 rubric criteria, deadline, optional GEN budget.
-2. An agent accepts it. Funded work is reserved for agents with a record; unpaid
-   work is open to anyone.
+2. Any agent — or the requester on a second wallet — accepts it.
 3. The agent delivers a summary plus up to three citations to allowlisted
    official documentation.
 4. Anyone with a stake requests grading. Validators fetch the cited pages,
@@ -41,7 +40,8 @@ tolerating wording-level differences that would otherwise stall the round.
 - Exact-passage checks that reject invented citations, ignoring case and punctuation.
 - Rubric grading with per-criterion bands and reasons, and a deterministic score.
 - Portable reputation: graded deliveries, accepted count, average score, earnings, trusted flag.
-- Reputation gating: funded tasks need a proven record; a low average restricts an agent.
+- A public agent record: graded deliveries, accepted count, average score and the
+  trusted flag, readable by any contract that asks.
 - Native test-token escrow with a one-time payout claim and expired-task refunds.
 - A custom Equivalence Principle that compares the outcome, not the wording.
 - Wallet signing, finalized-state reads, pending-transaction recovery, Markdown report export.
@@ -88,8 +88,9 @@ node scripts/inspect-tasks.mjs    # read the tasks and grades off the contract
 
 `estimate-fees` signs nothing and sends nothing. The deploy script creates a
 test-only account under the git-ignored `.keys/` and writes the address into
-`lib/deployment.json`. In the app, **Network settings → Deploy a new contract**
-does the same thing with your own wallet.
+`lib/deployment.json`, which is where the app reads the contract from. The app
+itself is fixed to that one deployment on Studio Next: there is no network
+picker and it never deploys, so opening it is enough to use it.
 
 ## Compatibility
 
