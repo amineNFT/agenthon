@@ -58,7 +58,7 @@ import {
   type Pending,
 } from '@/lib/chain';
 import deployment from '@/lib/deployment.json';
-import { FinalizedFailure } from '@/lib/receipt';
+import { ConsensusFailure, FinalizedFailure } from '@/lib/receipt';
 import { feeUsage, type FeeUsage } from '@/lib/fees';
 import { FeeReceipt, formatGen } from '@genlayer/transaction-kit-react';
 import type { PolicyQuote } from '@genlayer/transaction-kit';
@@ -311,12 +311,25 @@ export default function Desk() {
         : 'No tasks have been posted to this contract yet.',
     );
   }
+  // Read the record back from the contract, so the panel shows what the chain
+  // holds rather than what the app hoped it sent.
+  async function pull(p: Pending) {
+    if (!p.taskId) return;
+    const current = await readTask(p.config, p.taskId);
+    replace(current);
+    if (wallet) setRecord(await readAgent(p.config, wallet).catch(() => null));
+  }
   async function complete(p: Pending) {
     let receipt;
     try {
       receipt = await track(p);
     } catch (e) {
-      if (e instanceof FinalizedFailure) setPending(null);
+      if (e instanceof FinalizedFailure || e instanceof ConsensusFailure) {
+        setPending(null);
+      }
+      // A round validators could not agree on writes nothing, so the call can be
+      // sent again; refresh so the panel shows the unchanged record.
+      if (e instanceof ConsensusFailure) await pull(p).catch(() => undefined);
       throw e;
     }
     setFeeUsed(feeUsage(receipt) ?? null);
@@ -331,10 +344,8 @@ export default function Desk() {
       setConfig(next);
       setNotice(`Contract deployed: ${address}`);
     } else if (p.taskId) {
-      const current = await readTask(p.config, p.taskId);
-      replace(current);
+      await pull(p);
       setNotice('The transaction finalized. The record below comes from the contract.');
-      if (wallet) setRecord(await readAgent(p.config, wallet).catch(() => null));
     }
     setPending(null);
   }

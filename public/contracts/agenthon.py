@@ -94,6 +94,28 @@ def _equivalent(leader: dict, independent: dict) -> bool:
         return False
     return True
 
+def _fetch(url: str) -> str:
+    """Read a cited source, tolerating one transient failure.
+
+    A validator that cannot retrieve a page must not silently turn the agent's
+    citation into a failure of the deliverable: retry once before giving up.
+    """
+    for _ in range(2):
+        try:
+            response = gl.nondet.web.get(url)
+            if response.status == 200 and response.body is not None and len(response.body) <= 750000:
+                return _plain(response.body.decode("utf-8", errors="replace"))[:18000]
+        except Exception:
+            continue
+    return ""
+
+def _ask(prompt: str) -> dict:
+    """One structured model call, retried once when the reply is unparseable."""
+    raw = gl.nondet.exec_prompt(prompt, response_format="json")
+    if isinstance(raw, dict):
+        return raw
+    return gl.nondet.exec_prompt(prompt, response_format="json")
+
 def _fresh_agent() -> dict:
     return {"graded": 0, "accepted": 0, "score_sum": 0, "average": 0,
             "earned_wei": "0", "trusted": False, "restricted": False}
@@ -243,14 +265,7 @@ class Agenthon(gl.contract.Contract):
                 url = claim["url"]
                 if url in evidence:
                     continue
-                try:
-                    response = gl.nondet.web.get(url)
-                    if response.status != 200 or response.body is None or len(response.body) > 750000:
-                        evidence[url] = ""
-                    else:
-                        evidence[url] = _plain(response.body.decode("utf-8", errors="replace"))[:18000]
-                except Exception:
-                    evidence[url] = ""
+                evidence[url] = _fetch(url)
             citations = []
             for claim in submission["claims"]:
                 source = evidence[claim["url"]]
@@ -267,7 +282,7 @@ contradicted = the source states the opposite.
 unsupported = the source is unrelated, ambiguous, truncated or silent.
 Return JSON: {"verdict":"supported|contradicted|unsupported", "quote":"short exact passage from the source", "reason":"one specific sentence"}.
 INPUT_JSON: """ + json.dumps({"citation": claim["text"], "source": source})
-                raw = gl.nondet.exec_prompt(prompt, response_format="json")
+                raw = _ask(prompt)
                 if not isinstance(raw, dict):
                     raise gl.vm.UserError("Invalid citation review")
                 verdict = raw.get("verdict", "unsupported")
@@ -290,7 +305,7 @@ Return exactly one item per criterion, in order.
 INPUT_JSON: """ + json.dumps({"title": title, "rubric": rubric,
                                "deliverable": submission["summary"],
                                "citations": citations})
-            graded = gl.nondet.exec_prompt(grade_prompt, response_format="json")
+            graded = _ask(grade_prompt)
             rows = graded.get("criteria") if isinstance(graded, dict) else None
             if not isinstance(rows, list) or len(rows) != len(rubric):
                 raise gl.vm.UserError("Invalid rubric grade")
@@ -306,8 +321,14 @@ INPUT_JSON: """ + json.dumps({"title": title, "rubric": rubric,
         def validate(leader: gl.vm.Result) -> bool:
             if not isinstance(leader, gl.vm.Return):
                 return False
-            # Every validator fetches the sources and grades the work itself.
-            return _equivalent(leader.calldata, evaluate())
+            # Every validator fetches the sources and grades the work itself. A
+            # validator that cannot finish disagrees with the leader rather than
+            # faulting the round, which would strand the task in grading.
+            try:
+                independent = evaluate()
+            except Exception:
+                return False
+            return _equivalent(leader.calldata, independent)
 
         grade = gl.vm.run_nondet(evaluate, validate)
         task["grade"] = grade

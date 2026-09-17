@@ -94,3 +94,14 @@ GEN and refunds what it does not consume.
   submission until the first is tracked. Press **Check status**.
 - **Wrong chain:** the app asks the wallet to switch to 61997 and refuses to
   sign until it does.
+
+## When a grading round does not land
+
+GenLayer validators vote on the leader's grading. If a majority cannot agree, the
+transaction is finalized as **undetermined** and **no state is written** — the task
+keeps reading *Awaiting grading* and the agent record does not move. The app now
+says so explicitly instead of reporting a success that never happened.
+
+Press **Grade delivery** again. Every round is independent, and a round only needs
+a majority that agrees on the decision and the criteria that failed; band noise
+between `met` and `partial` is tolerated by design.
