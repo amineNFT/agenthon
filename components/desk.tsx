@@ -60,8 +60,7 @@ import {
 import deployment from '@/lib/deployment.json';
 import { ConsensusFailure, FinalizedFailure } from '@/lib/receipt';
 import { feeUsage, type FeeUsage } from '@/lib/fees';
-import { FeeReceipt, formatGen } from '@genlayer/transaction-kit-react';
-import type { PolicyQuote } from '@genlayer/transaction-kit';
+import { formatGen } from '@genlayer/transaction-kit-react';
 
 const CONFIG_KEY = 'agenthon:network:v1',
   DRAFT_KEY = 'agenthon:drafts:v1',
@@ -118,8 +117,6 @@ export default function Desk() {
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
-  const [feeQuote, setFeeQuote] = useState<PolicyQuote | null>(null);
-  const [feeUsed, setFeeUsed] = useState<FeeUsage | null>(null);
   const [record, setRecord] = useState<AgentRecord | null>(null);
   const [more, setMore] = useState(false);
   const [now, setNow] = useState(0);
@@ -332,7 +329,6 @@ export default function Desk() {
       if (e instanceof ConsensusFailure) await pull(p).catch(() => undefined);
       throw e;
     }
-    setFeeUsed(feeUsage(receipt) ?? null);
     if (p.action === 'deploy') {
       const address =
         receipt.data?.contract_address ?? receipt.to_address ?? receipt.recipient;
@@ -345,14 +341,19 @@ export default function Desk() {
       setNotice(`Contract deployed: ${address}`);
     } else if (p.taskId) {
       await pull(p);
-      setNotice('The transaction finalized. The record below comes from the contract.');
+      const used = feeUsage(receipt);
+      setNotice(
+        used
+          ? `Transaction finalized · ${feeUsageLine(used)}`
+          : 'Transaction finalized. The record below comes from the contract.',
+      );
     }
     setPending(null);
   }
   async function transact(action: string, args: (string | number)[], id: string, value = 0n) {
     if (pending)
       throw new Error('Track the pending transaction before submitting another.');
-    const hash = await send(config, walletSession(), action, args, value, setFeeQuote);
+    const hash = await send(config, walletSession(), action, args, value);
     const p: Pending = { hash, action, taskId: id, config: { ...config } };
     setPending(p);
     localStorage.setItem(PENDING_KEY, JSON.stringify(p));
@@ -511,30 +512,23 @@ export default function Desk() {
           </div>
         )}
         {pending && (
-          <div className="tx-card">
-            <div className="card-head">
-              <strong>
-                Transaction submitted · {pending.action.replaceAll('_', ' ')}
-              </strong>
-              <span className="status open">{pending.config.network}</span>
-            </div>
-            <code>{pending.hash}</code>
-            <p className="card-note">
-              Keep this ID. A timeout does not mean the transaction failed.
-            </p>
-            {feeQuote && <FeeReceipt quote={feeQuote} busy={Boolean(busy)} />}
-            {feeUsed && <p className="card-note">{feeUsageLine(feeUsed)}</p>}
-            <div className="tx-actions">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={Boolean(busy)}
+          <output className="tx-bar" aria-live="polite">
+            <span className="spinner" aria-hidden="true" />
+            <strong>
+              Transaction sent · {pending.action.replaceAll('_', ' ')}
+            </strong>
+            <span className="mono">{short(pending.hash)}</span>
+            {busy ? (
+              <span className="tx-note">waiting for the network</span>
+            ) : (
+              <button
+                className="text-button"
                 onClick={() => run('Checking transaction', () => complete(pending))}
               >
-                <RefreshCw /> Check status
-              </Button>
-            </div>
-          </div>
+                Check status
+              </button>
+            )}
+          </output>
         )}
         <div className="workbench">
           <aside className="task-rail">
@@ -878,8 +872,6 @@ export default function Desk() {
               setWallet('');
               setTasks((prev) => prev.filter((row) => row.origin !== 'chain'));
               setSelected('');
-              setFeeQuote(null);
-              setFeeUsed(null);
               setModal(null);
               setNotice('Network settings saved.');
             }}
@@ -887,7 +879,7 @@ export default function Desk() {
               run('Deploying Agenthon', async () => {
                 if (pending)
                   throw new Error('Track the pending transaction first.');
-                const hash = await deploy(next, walletSession(), setFeeQuote);
+                const hash = await deploy(next, walletSession());
                 const p: Pending = { hash, action: 'deploy', config: next };
                 setPending(p);
                 localStorage.setItem(PENDING_KEY, JSON.stringify(p));

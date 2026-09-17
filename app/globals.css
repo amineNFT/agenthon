@@ -839,3 +839,51 @@ code,
     font-size: 25px;
   }
 }
+
+/* --------------------------------------------------- transaction indicator */
+
+/* One line while a transaction is in flight: enough to know it was sent, not
+   a receipt to read. Fees are reported once, after finalization. */
+.tx-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 9px 14px;
+  border: 1px solid rgba(113, 112, 255, 0.28);
+  border-radius: 10px;
+  background: rgba(113, 112, 255, 0.07);
+  font-size: 13px;
+}
+.tx-bar strong {
+  font-weight: 510;
+}
+.tx-bar .mono {
+  color: var(--faint);
+}
+.tx-note {
+  margin-left: auto;
+  color: var(--muted-foreground);
+}
+.tx-bar .text-button {
+  margin-left: auto;
+}
+.spinner {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(130, 143, 255, 0.35);
+  border-top-color: var(--accent-hover);
+  animation: spin 720ms linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+}
